@@ -1,5 +1,24 @@
 const pool = require("../db");
 
+// Identifiants admin en dur (à modifier selon tes besoins)
+const ADMIN_USERNAME = "Admivieedu";
+const ADMIN_PASSWORD = "44502";
+
+// Login admin
+exports.loginAdmin = async (req, res) => {
+    const { username, password } = req.body;
+
+    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+        res.json({ 
+            success: true, 
+            message: "Connexion réussie",
+            token: "admin-token-123" // Token simple pour le frontend
+        });
+    } else {
+        res.status(401).json({ error: "Identifiants incorrects" });
+    }
+};
+
 // Inscription d'un participant
 exports.inscrire = async (req, res) => {
     const { nom, prenom, sexe } = req.body;
@@ -38,8 +57,8 @@ exports.getParticipants = async (req, res) => {
     }
 };
 
-// Lancer le pairing
-exports.lancerPairing = async (req, res) => {
+// Lancer le pairing (nom de la fonction = fairePairing pour correspondre à app.js)
+exports.fairePairing = async (req, res) => {
     try {
         // Récupérer tous les users
         const [users] = await pool.query("SELECT * FROM users");
@@ -141,8 +160,8 @@ exports.getPaires = async (req, res) => {
     }
 };
 
-// Exporter en CSV
-exports.exporterCSV = async (req, res) => {
+// Exporter en CSV (nom de la fonction = exporterExcel pour correspondre à app.js)
+exports.exporterExcel = async (req, res) => {
     try {
         const [paires] = await pool.query(`
             SELECT 
