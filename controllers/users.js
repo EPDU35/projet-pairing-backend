@@ -28,6 +28,17 @@ exports.inscrire = async (req, res) => {
     }
 
     try {
+        // Vérifier si la personne est déjà inscrite
+        const [existing] = await pool.query(
+            "SELECT * FROM users WHERE LOWER(nom) = LOWER(?) AND LOWER(prenom) = LOWER(?)",
+            [nom.trim(), prenom.trim()]
+        );
+
+        if (existing.length > 0) {
+            return res.status(409).json({ error: "Tu es déjà inscrit !" });
+        }
+
+        // Insérer le nouveau participant
         const [result] = await pool.query(
             "INSERT INTO users (nom, prenom, sexe) VALUES (?, ?, ?)",
             [nom.trim(), prenom.trim(), sexe]
