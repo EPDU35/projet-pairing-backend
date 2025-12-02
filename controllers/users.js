@@ -231,3 +231,89 @@ exports.reinitialiser = async (req, res) => {
         res.status(500).json({ message: "Erreur lors de la réinitialisation" });
     }
 };
+
+// Nouvelle fonction : Supprimer un participant
+exports.supprimerParticipant = async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const [result] = await pool.query("DELETE FROM users WHERE id = ?", [id]);
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: "Participant non trouvé" });
+        }
+        
+        res.json({ message: "Participant supprimé avec succès" });
+    } catch (err) {
+        console.error("Erreur suppression:", err);
+        res.status(500).json({ message: "Erreur lors de la suppression" });
+    }
+};
+
+// Nouvelle fonction : Découvrir son attribution
+exports.decouvrirAttribution = async (req, res) => {
+    const { nom, prenom } = req.body;
+    
+    if (!nom || !prenom) {
+        return res.status(400).json({ message: "Nom et prénom requis" });
+    }
+    
+    try {
+        // Vérifier que la personne existe
+        const [users] = await pool.query(
+            "SELECT * FROM users WHERE LOWER(nom) = LOWER(?) AND LOWER(prenom) = LOWER(?)",
+            [nom.trim(), prenom.trim()]
+        );
+        
+        if (users.length === 0) {
+            return res.status(404).json({ 
+                message: "Aucune inscription trouvée avec ce nom et prénom. Vérifie l'orthographe !" 
+            });
+        }
+        
+        const donneur = users[0];
+        
+        // Chercher son attribution
+        const [attributions] = await pool.query(`
+            SELECT u.prenom, u.nom, u.sexe
+            FROM attributions a
+            JOIN users u ON a.receveur_id = u.id
+            WHERE a.donneur_id = ?
+        `, [donneur.id]);
+        
+        if (attributions.length === 0) {
+            return res.status(404).json({ 
+                message: "Le tirage n'a pas encore été effectué. Reviens plus tard !" 
+            });
+        }
+        
+        const receveur = attributions[0];
+        
+        res.json({
+            message: "Voici ton attribution",
+            receveur: `${receveur.prenom} ${receveur.nom}`,
+            sexeReceveur: receveur.sexe
+        });
+        
+    } catch (err) {
+        console.error("Erreur:", err);
+        res.status(500).json({ message: "Erreur lors de la recherche" });
+    }
+};
+
+// Vérifier si le tirage a été effectué
+exports.verifierStatutTirage = async (req, res) => {
+    try {
+        const [attributions] = await pool.query("SELECT COUNT(*) as total FROM attributions");
+        
+        const tirageEffectue = attributions[0].total > 0;
+        
+        res.json({ 
+            tirageEffectue,
+            message: tirageEffectue ? "Le tirage a été effectué" : "Le tirage n'a pas encore été effectué"
+        });
+    } catch (err) {
+        console.error("Erreur:", err);
+        res.status(500).json({ message: "Erreur lors de la vérification" });
+    }
+};
