@@ -10,16 +10,16 @@ setInterval(() => {
 }, 15 * 60 * 1000);
 
 exports.loginAdmin = async (req, res) => {
-    const { username, password } = req.body;
+    const { identifiant, code } = req.body;
     const ip = req.ip || req.connection.remoteAddress;
 
     if (loginAttempts[ip] >= 5) {
         return res.status(429).json({ 
-            error: "Trop de tentatives. Réessaie dans 15 minutes" 
+            message: "Trop de tentatives. Réessaie dans 15 minutes" 
         });
     }
 
-    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    if (identifiant === ADMIN_USERNAME && code === ADMIN_PASSWORD) {
         loginAttempts[ip] = 0;
         res.json({ 
             success: true, 
@@ -29,7 +29,8 @@ exports.loginAdmin = async (req, res) => {
     } else {
         loginAttempts[ip] = (loginAttempts[ip] || 0) + 1;
         res.status(401).json({ 
-            error: "Identifiants incorrects",
+            success: false,
+            message: "Identifiants incorrects",
             tentativesRestantes: 5 - loginAttempts[ip]
         });
     }
@@ -39,7 +40,7 @@ exports.inscrire = async (req, res) => {
     const { nom, prenom, sexe } = req.body;
 
     if (!nom || !prenom || !sexe) {
-        return res.status(400).json({ error: "Tous les champs sont obligatoires" });
+        return res.status(400).json({ message: "Tous les champs sont obligatoires" });
     }
 
     try {
@@ -49,7 +50,7 @@ exports.inscrire = async (req, res) => {
         );
 
         if (existing.length > 0) {
-            return res.status(409).json({ error: "Tu es déjà inscrit !" });
+            return res.status(409).json({ message: "Tu es déjà inscrit !" });
         }
 
         const [result] = await pool.query(
@@ -59,7 +60,7 @@ exports.inscrire = async (req, res) => {
         res.json({ message: "Inscription réussie", userId: result.insertId });
     } catch (err) {
         console.error("Erreur insertion:", err);
-        res.status(500).json({ error: "Erreur lors de l'inscription" });
+        res.status(500).json({ message: "Erreur lors de l'inscription" });
     }
 };
 
@@ -76,7 +77,7 @@ exports.getParticipants = async (req, res) => {
         res.json({ users, stats });
     } catch (err) {
         console.error("Erreur:", err);
-        res.status(500).json({ error: "Erreur lors de la récupération des participants" });
+        res.status(500).json({ message: "Erreur lors de la récupération des participants" });
     }
 };
 
@@ -85,7 +86,7 @@ exports.fairePairing = async (req, res) => {
         const [users] = await pool.query("SELECT * FROM users");
 
         if (users.length < 2) {
-            return res.status(400).json({ error: "Il faut au moins 2 participants" });
+            return res.status(400).json({ message: "Il faut au moins 2 participants" });
         }
 
         let garcons = users.filter(u => u.sexe === "M");
@@ -93,7 +94,7 @@ exports.fairePairing = async (req, res) => {
 
         if (garcons.length === 0 || filles.length === 0) {
             return res.status(400).json({ 
-                error: "Il faut au moins 1 garçon et 1 fille pour un tirage mixte" 
+                message: "Il faut au moins 1 garçon et 1 fille pour un tirage mixte" 
             });
         }
 
@@ -111,6 +112,7 @@ exports.fairePairing = async (req, res) => {
 
         const attributions = [];
 
+        // Chaque fille donne à un garçon
         for (let i = 0; i < filles.length; i++) {
             const garcon = garcons[i % garcons.length];
             attributions.push({
@@ -119,6 +121,7 @@ exports.fairePairing = async (req, res) => {
             });
         }
 
+        // Chaque garçon donne à une fille
         const fillesMelangees = melanger([...filles]);
         for (let i = 0; i < garcons.length; i++) {
             const fille = fillesMelangees[i % fillesMelangees.length];
@@ -157,7 +160,7 @@ exports.fairePairing = async (req, res) => {
 
     } catch (err) {
         console.error("Erreur tirage:", err);
-        res.status(500).json({ error: "Erreur lors du tirage" });
+        res.status(500).json({ message: "Erreur lors du tirage" });
     }
 };
 
@@ -186,7 +189,7 @@ exports.getPaires = async (req, res) => {
         res.json({ paires: formatted });
     } catch (err) {
         console.error("Erreur:", err);
-        res.status(500).json({ error: "Erreur lors de la récupération des attributions" });
+        res.status(500).json({ message: "Erreur lors de la récupération des attributions" });
     }
 };
 
@@ -201,4 +204,40 @@ exports.exporterExcel = async (req, res) => {
             JOIN users r ON a.receveur_id = r.id
         `);
 
-        let csv = "Donneur,Sexe Donneur,Receveur,Sexe Receveur,Typ
+        if (attributions.length === 0) {
+            return res.status(404).json({ 
+                message: "Aucune attribution à exporter" 
+            });
+        }
+
+        let csv = "\uFEFF";
+        csv += "Donneur,Sexe Donneur,Receveur,Sexe Receveur,Type\n";
+        
+        attributions.forEach((a) => {
+            const type = a.sexe_donneur === "F" ? "Fille vers Garcon" : "Garcon vers Fille";
+            csv += `${a.prenom_donneur} ${a.nom_donneur},${a.sexe_donneur},`;
+            csv += `${a.prenom_receveur} ${a.nom_receveur},${a.sexe_receveur},${type}\n`;
+        });
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename=attributions-bde-2025.csv');
+        res.send(csv);
+    } catch (err) {
+        console.error("Erreur export:", err);
+        res.status(500).json({ message: "Erreur lors de l'export" });
+    }
+};
+
+exports.reinitialiser = async (req, res) => {
+    try {
+        await pool.query("DELETE FROM attributions");
+        await pool.query("DELETE FROM users");
+        await pool.query("ALTER TABLE users AUTO_INCREMENT = 1");
+        await pool.query("ALTER TABLE attributions AUTO_INCREMENT = 1");
+        
+        res.json({ message: "Tout a été réinitialisé avec succès" });
+    } catch (err) {
+        console.error("Erreur:", err);
+        res.status(500).json({ message: "Erreur lors de la réinitialisation" });
+    }
+};
