@@ -91,15 +91,7 @@ exports.fairePairing = async (req, res) => {
             return res.status(400).json({ message: "Il faut au moins 2 participants" });
         }
 
-        let garcons = users.filter(u => u.sexe === "M");
-        let filles = users.filter(u => u.sexe === "F");
-
-        if (garcons.length === 0 || filles.length === 0) {
-            return res.status(400).json({ 
-                message: "Il faut au moins 1 garçon et 1 fille pour un tirage mixte" 
-            });
-        }
-
+        // Mélange Fisher-Yates
         const melanger = (arr) => {
             const shuffled = [...arr];
             for (let i = shuffled.length - 1; i > 0; i--) {
@@ -109,55 +101,51 @@ exports.fairePairing = async (req, res) => {
             return shuffled;
         };
 
-        garcons = melanger(garcons);
-        filles = melanger(filles);
-
+        // Créer un cycle : chaque personne donne à la suivante
+        // A -> B -> C -> D -> A (cycle fermé)
+        const usersMelanges = melanger([...users]);
         const attributions = [];
 
-        // Chaque fille donne à un garçon
-        for (let i = 0; i < filles.length; i++) {
-            const garcon = garcons[i % garcons.length];
-            attributions.push({
-                donneur: filles[i],
-                receveur: garcon
-            });
-        }
-
-        // Chaque garçon donne à une fille
-        const fillesMelangees = melanger([...filles]);
-        for (let i = 0; i < garcons.length; i++) {
-            const fille = fillesMelangees[i % fillesMelangees.length];
-            attributions.push({
-                donneur: garcons[i],
-                receveur: fille
-            });
-        }
-
-        await pool.query("DELETE FROM attributions");
-
-        for (const attr of attributions) {
-            try {
-                await pool.query(
-                    "INSERT IGNORE INTO attributions (donneur_id, receveur_id) VALUES (?, ?)",
-                    [attr.donneur.id, attr.receveur.id]
-                );
-            } catch (err) {
-                console.error("Erreur insertion attribution:", err);
+        for (let i = 0; i < usersMelanges.length; i++) {
+            const donneur = usersMelanges[i];
+            const receveur = usersMelanges[(i + 1) % usersMelanges.length];
+            
+            // Éviter qu'une personne se donne à elle-même
+            if (donneur.id !== receveur.id) {
+                attributions.push({
+                    donneur: donneur,
+                    receveur: receveur
+                });
             }
         }
 
+        // Supprimer anciennes attributions
+        await pool.query("DELETE FROM attributions");
+
+        // Insérer les nouvelles
+        for (const attr of attributions) {
+            await pool.query(
+                "INSERT INTO attributions (donneur_id, receveur_id) VALUES (?, ?)",
+                [attr.donneur.id, attr.receveur.id]
+            );
+        }
+
+        const stats = {
+            total: attributions.length,
+            garconsVersFilles: attributions.filter(a => a.donneur.sexe === "M" && a.receveur.sexe === "F").length,
+            fillesVersGarcons: attributions.filter(a => a.donneur.sexe === "F" && a.receveur.sexe === "M").length,
+            memeSexe: attributions.filter(a => a.donneur.sexe === a.receveur.sexe).length
+        };
+
         res.json({
-            message: "Tirage réussi",
+            message: "Tirage réussi ! Chaque personne donne à une seule personne et reçoit d'une seule personne",
             attributions: attributions.map(a => ({
                 donneur: `${a.donneur.prenom} ${a.donneur.nom}`,
                 receveur: `${a.receveur.prenom} ${a.receveur.nom}`,
-                type: a.donneur.sexe === "F" ? "fille_vers_garcon" : "garcon_vers_fille"
+                sexeDonneur: a.donneur.sexe,
+                sexeReceveur: a.receveur.sexe
             })),
-            stats: {
-                total: attributions.length,
-                fillesVersGarcons: attributions.filter(a => a.donneur.sexe === "F").length,
-                garconsVersFilles: attributions.filter(a => a.donneur.sexe === "M").length
-            }
+            stats
         });
 
     } catch (err) {
