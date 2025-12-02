@@ -1,250 +1,181 @@
-const db = require("../db");
+const pool = require("../db");
 
-// Inscription étudiant
-exports.inscrire = (req, res) => {
+// Inscription d'un participant
+exports.inscrire = async (req, res) => {
     const { nom, prenom, sexe } = req.body;
 
     if (!nom || !prenom || !sexe) {
-        return res.status(400).json({ message: "Tous les champs sont requis" });
+        return res.status(400).json({ error: "Tous les champs sont obligatoires" });
     }
 
-    if (!['M', 'F'].includes(sexe)) {
-        return res.status(400).json({ message: "Sexe invalide (M ou F)" });
-    }
-
-    const sql = "INSERT INTO users (nom, prenom, sexe) VALUES (?, ?, ?)";
-    
-    db.query(sql, [nom.trim(), prenom.trim(), sexe], (err) => {
-        if (err) {
-            console.log("Erreur insertion:", err);
-            return res.status(500).json({ message: "Erreur serveur" });
-        }
-        res.json({ message: "Inscription réussie !" });
-    });
-};
-
-// Login admin
-exports.loginAdmin = (req, res) => {
-    const { identifiant, code } = req.body;
-
-    if (identifiant === "Admivieedu" && code === "44502") {
-        res.json({ 
-            success: true, 
-            message: "Connexion réussie",
-            token: "admin-bde-2025" 
-        });
-    } else {
-        res.status(401).json({ 
-            success: false, 
-            message: "Identifiant ou code incorrect" 
-        });
+    try {
+        const [result] = await pool.query(
+            "INSERT INTO users (nom, prenom, sexe) VALUES (?, ?, ?)",
+            [nom.trim(), prenom.trim(), sexe]
+        );
+        res.json({ message: "Inscription réussie", userId: result.insertId });
+    } catch (err) {
+        console.error("Erreur insertion:", err);
+        res.status(500).json({ error: "Erreur lors de l'inscription" });
     }
 };
 
 // Récupérer tous les participants
-exports.getParticipants = (req, res) => {
-    const sql = "SELECT * FROM users ORDER BY created_at DESC";
-    
-    db.query(sql, (err, users) => {
-        if (err) {
-            console.log("Erreur:", err);
-            return res.status(500).json({ message: "Erreur serveur" });
-        }
+exports.getParticipants = async (req, res) => {
+    try {
+        const [users] = await pool.query("SELECT * FROM users ORDER BY created_at DESC");
         
-        const garcons = users.filter(u => u.sexe === "M").length;
-        const filles = users.filter(u => u.sexe === "F").length;
-        
-        res.json({
-            users: users,
-            stats: {
-                total: users.length,
-                garcons: garcons,
-                filles: filles
-            }
-        });
-    });
+        const stats = {
+            total: users.length,
+            garcons: users.filter(u => u.sexe === "M").length,
+            filles: users.filter(u => u.sexe === "F").length
+        };
+
+        res.json({ users, stats });
+    } catch (err) {
+        console.error("Erreur:", err);
+        res.status(500).json({ error: "Erreur lors de la récupération des participants" });
+    }
 };
 
-// Faire le pairing automatique
-exports.fairePairing = (req, res) => {
-    db.query("SELECT * FROM users", (err, users) => {
-        if (err) {
-            console.log("Erreur:", err);
-            return res.status(500).json({ message: "Erreur serveur" });
-        }
+// Lancer le pairing
+exports.lancerPairing = async (req, res) => {
+    try {
+        // Récupérer tous les users
+        const [users] = await pool.query("SELECT * FROM users");
 
         if (users.length < 2) {
-            return res.status(400).json({ 
-                message: "Il faut au moins 2 participants" 
-            });
+            return res.status(400).json({ error: "Il faut au moins 2 participants" });
         }
 
-        // Mélange aléatoire
-        let garcons = users.filter(u => u.sexe === "M").sort(() => Math.random() - 0.5);
-        let filles = users.filter(u => u.sexe === "F").sort(() => Math.random() - 0.5);
-        
+        // Séparer par sexe
+        let garcons = users.filter(u => u.sexe === "M");
+        let filles = users.filter(u => u.sexe === "F");
+
+        // Mélanger avec Fisher-Yates
+        const melanger = (arr) => {
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        };
+
+        garcons = melanger(garcons);
+        filles = melanger(filles);
+
         const paires = [];
+        const seuls = [];
 
-        // Paires mixtes en priorité
-        while (garcons.length && filles.length) {
-            const g = garcons.pop();
-            const f = filles.pop();
-            paires.push({
-                personne1: g,
-                personne2: f,
-                type: "mixte"
-            });
+        // Créer des paires mixtes
+        while (garcons.length > 0 && filles.length > 0) {
+            const g = garcons.shift();
+            const f = filles.shift();
+            paires.push({ user1: g, user2: f, type: "mixte" });
         }
 
-        // Paires de garçons si filles épuisées
-        while (garcons.length > 1) {
-            const g1 = garcons.pop();
-            const g2 = garcons.pop();
-            paires.push({
-                personne1: g1,
-                personne2: g2,
-                type: "meme_sexe"
-            });
+        // Gérer les personnes seules
+        const restants = [...garcons, ...filles];
+        while (restants.length >= 2) {
+            const p1 = restants.shift();
+            const p2 = restants.shift();
+            paires.push({ user1: p1, user2: p2, type: "meme_sexe" });
         }
 
-        // Paires de filles si garçons épuisés
-        while (filles.length > 1) {
-            const f1 = filles.pop();
-            const f2 = filles.pop();
-            paires.push({
-                personne1: f1,
-                personne2: f2,
-                type: "meme_sexe"
-            });
+        if (restants.length === 1) {
+            seuls.push(restants[0]);
         }
 
-        // Gestion des personnes seules
-        const personnesSeules = [];
-        if (garcons.length === 1) personnesSeules.push(garcons[0]);
-        if (filles.length === 1) personnesSeules.push(filles[0]);
+        // Supprimer les anciennes paires
+        await pool.query("DELETE FROM paires");
 
-        if (personnesSeules.length > 0) {
-            paires.push({
-                personne1: personnesSeules[0],
-                personne2: null,
-                type: "seul"
-            });
+        // Insérer les nouvelles paires
+        for (const p of paires) {
+            await pool.query(
+                "INSERT INTO paires (user1_id, user2_id, type_paire) VALUES (?, ?, ?)",
+                [p.user1.id, p.user2.id, p.type]
+            );
         }
 
-        // Supprimer anciennes paires
-        db.query("DELETE FROM paires", (err) => {
-            if (err) {
-                console.log("Erreur suppression paires:", err);
-                return res.status(500).json({ message: "Erreur serveur" });
-            }
-
-            // Sauvegarder nouvelles paires (seulement celles avec 2 personnes)
-            const pairesAInserer = paires.filter(p => p.personne2 !== null);
-            
-            if (pairesAInserer.length === 0) {
-                return res.json({
-                    message: "Pairing effectué !",
-                    paires: paires,
-                    stats: { 
-                        total: paires.length, 
-                        mixtes: 0, 
-                        meme_sexe: 0,
-                        seuls: paires.filter(p => p.type === "seul").length
-                    }
-                });
-            }
-
-            let compteur = 0;
-            let erreurInsert = false;
-
-            pairesAInserer.forEach((p) => {
-                const sql = "INSERT INTO paires (user1_id, user2_id, type_paire) VALUES (?, ?, ?)";
-                db.query(sql, [p.personne1.id, p.personne2.id, p.type], (err) => {
-                    if (err) {
-                        console.log("Erreur insertion paire:", err);
-                        erreurInsert = true;
-                    }
-                    compteur++;
-                    
-                    if (compteur === pairesAInserer.length) {
-                        if (erreurInsert) {
-                            return res.status(500).json({ message: "Erreur lors de l'insertion des paires" });
-                        }
-                        
-                        res.json({
-                            message: "Pairing effectué avec succès !",
-                            paires: paires,
-                            stats: {
-                                total: paires.length,
-                                mixtes: paires.filter(p => p.type === "mixte").length,
-                                meme_sexe: paires.filter(p => p.type === "meme_sexe").length,
-                                seuls: paires.filter(p => p.type === "seul").length
-                            }
-                        });
-                    }
-                });
-            });
+        res.json({ 
+            message: "Pairing réussi",
+            paires: paires.map(p => ({
+                binome: `${p.user1.prenom} ${p.user1.nom} + ${p.user2.prenom} ${p.user2.nom}`,
+                type: p.type
+            })),
+            seuls: seuls.map(s => `${s.prenom} ${s.nom}`)
         });
-    });
+
+    } catch (err) {
+        console.error("Erreur pairing:", err);
+        res.status(500).json({ error: "Erreur lors du pairing" });
+    }
 };
 
-// Exporter en format Excel (CSV)
-exports.exporterExcel = (req, res) => {
-    const sql = `
-        SELECT 
-            u1.nom as nom1, u1.prenom as prenom1, u1.sexe as sexe1,
-            u2.nom as nom2, u2.prenom as prenom2, u2.sexe as sexe2,
-            p.type_paire
-        FROM paires p
-        JOIN users u1 ON p.user1_id = u1.id
-        JOIN users u2 ON p.user2_id = u2.id
-        ORDER BY p.id
-    `;
-    
-    db.query(sql, (err, paires) => {
-        if (err) {
-            console.log("Erreur:", err);
-            return res.status(500).json({ message: "Erreur serveur" });
-        }
+// Récupérer les paires existantes
+exports.getPaires = async (req, res) => {
+    try {
+        const [paires] = await pool.query(`
+            SELECT 
+                p.*,
+                u1.nom as nom1, u1.prenom as prenom1, u1.sexe as sexe1,
+                u2.nom as nom2, u2.prenom as prenom2, u2.sexe as sexe2
+            FROM paires p
+            JOIN users u1 ON p.user1_id = u1.id
+            JOIN users u2 ON p.user2_id = u2.id
+            ORDER BY p.created_at DESC
+        `);
 
-        if (paires.length === 0) {
-            return res.status(404).json({ message: "Aucune paire à exporter" });
-        }
+        const formatted = paires.map(p => ({
+            id: p.id,
+            binome: `${p.prenom1} ${p.nom1} + ${p.prenom2} ${p.nom2}`,
+            type: p.type_paire,
+            user1: { nom: p.nom1, prenom: p.prenom1, sexe: p.sexe1 },
+            user2: { nom: p.nom2, prenom: p.prenom2, sexe: p.sexe2 }
+        }));
 
-        // Générer CSV avec BOM UTF-8 pour Excel
-        let csv = "\uFEFF"; // BOM UTF-8
-        csv += "Binome,Nom 1,Prenom 1,Sexe 1,Nom 2,Prenom 2,Sexe 2,Type\n";
-        
-        paires.forEach((p, i) => {
-            csv += `${i + 1},${p.nom1},${p.prenom1},${p.sexe1},${p.nom2},${p.prenom2},${p.sexe2},${p.type_paire}\n`;
+        res.json({ paires: formatted });
+    } catch (err) {
+        console.error("Erreur:", err);
+        res.status(500).json({ error: "Erreur lors de la récupération des paires" });
+    }
+};
+
+// Exporter en CSV
+exports.exporterCSV = async (req, res) => {
+    try {
+        const [paires] = await pool.query(`
+            SELECT 
+                u1.prenom as prenom1, u1.nom as nom1,
+                u2.prenom as prenom2, u2.nom as nom2,
+                p.type_paire
+            FROM paires p
+            JOIN users u1 ON p.user1_id = u1.id
+            JOIN users u2 ON p.user2_id = u2.id
+        `);
+
+        let csv = "Personne 1,Personne 2,Type\n";
+        paires.forEach(p => {
+            csv += `"${p.prenom1} ${p.nom1}","${p.prenom2} ${p.nom2}",${p.type_paire}\n`;
         });
 
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', 'attachment; filename=binomes-bde-2025.csv');
+        res.setHeader("Content-Type", "text/csv");
+        res.setHeader("Content-Disposition", "attachment; filename=pairings.csv");
         res.send(csv);
-    });
+    } catch (err) {
+        console.error("Erreur export:", err);
+        res.status(500).json({ error: "Erreur lors de l'export" });
+    }
 };
 
 // Réinitialiser tout
-exports.reinitialiser = (req, res) => {
-    db.query("DELETE FROM paires", (err) => {
-        if (err) {
-            console.log("Erreur:", err);
-            return res.status(500).json({ message: "Erreur serveur" });
-        }
-        
-        db.query("DELETE FROM users", (err) => {
-            if (err) {
-                console.log("Erreur:", err);
-                return res.status(500).json({ message: "Erreur serveur" });
-            }
-            
-            // Réinitialiser les auto-increment
-            db.query("ALTER TABLE users AUTO_INCREMENT = 1", () => {
-                db.query("ALTER TABLE paires AUTO_INCREMENT = 1", () => {
-                    res.json({ message: "Tout a été réinitialisé" });
-                });
-            });
-        });
-    });
+exports.reinitialiser = async (req, res) => {
+    try {
+        await pool.query("DELETE FROM paires");
+        await pool.query("DELETE FROM users");
+        res.json({ message: "Base de données réinitialisée" });
+    } catch (err) {
+        console.error("Erreur:", err);
+        res.status(500).json({ error: "Erreur lors de la réinitialisation" });
+    }
 };
