@@ -1,4 +1,4 @@
-const mysql = require("mysql2");
+const mysql = require("mysql2/promise");
 
 // Utiliser l'URL complète de Railway si disponible
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -6,11 +6,13 @@ const DATABASE_URL = process.env.DATABASE_URL;
 let pool;
 
 if (DATABASE_URL) {
-    // Créer un pool avec l'URL complète
+    // Créer un pool avec l'URL complète (pour production)
     pool = mysql.createPool({
         uri: DATABASE_URL,
         waitForConnections: true,
         connectionLimit: 10,
+        maxIdle: 10,
+        idleTimeout: 60000,
         queueLimit: 0,
         enableKeepAlive: true,
         keepAliveInitialDelay: 0
@@ -25,61 +27,55 @@ if (DATABASE_URL) {
         port: process.env.DB_PORT || 3306,
         waitForConnections: true,
         connectionLimit: 10,
+        maxIdle: 10,
+        idleTimeout: 60000,
         queueLimit: 0,
         enableKeepAlive: true,
         keepAliveInitialDelay: 0
     });
 }
 
-// Tester la connexion au démarrage
-pool.getConnection((err, connection) => {
-    if (err) {
-        console.error("Connexion MySQL échouée:", err.message);
-        console.log("Vérifie tes variables d'environnement DATABASE_URL ou DB_HOST");
-        return;
-    }
-    console.log("MySQL connecté avec succès");
-    
-    // Créer les tables si elles n'existent pas
-    const createUsersTable = `
-        CREATE TABLE IF NOT EXISTS users (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            nom VARCHAR(100) NOT NULL,
-            prenom VARCHAR(100) NOT NULL,
-            sexe ENUM('M', 'F') NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `;
-    
-    const createPairesTable = `
-        CREATE TABLE IF NOT EXISTS paires (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            user1_id INT NOT NULL,
-            user2_id INT NOT NULL,
-            type_paire ENUM('mixte', 'meme_sexe') NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user1_id) REFERENCES users(id) ON DELETE CASCADE,
-            FOREIGN KEY (user2_id) REFERENCES users(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `;
-    
-    connection.query(createUsersTable, (err) => {
-        if (err) {
-            console.error("Erreur création table users:", err.message);
-        } else {
-            console.log("Table users prête");
-        }
-    });
-    
-    connection.query(createPairesTable, (err) => {
-        if (err) {
-            console.error("Erreur création table paires:", err.message);
-        } else {
-            console.log("Table paires prête");
-        }
-        connection.release();
-    });
-});
+// Fonction pour initialiser les tables
+async function initializeTables() {
+    let connection;
+    try {
+        connection = await pool.getConnection();
+        console.log("MySQL connecté avec succès");
 
-// Exporter le pool (pas une simple connexion)
+        // Créer la table users
+        await connection.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                nom VARCHAR(100) NOT NULL,
+                prenom VARCHAR(100) NOT NULL,
+                sexe ENUM('M', 'F') NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        console.log("Table users prête");
+
+        // Créer la table paires
+        await connection.query(`
+            CREATE TABLE IF NOT EXISTS paires (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user1_id INT NOT NULL,
+                user2_id INT NOT NULL,
+                type_paire ENUM('mixte', 'meme_sexe') NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user1_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (user2_id) REFERENCES users(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        console.log("Table paires prête");
+
+    } catch (err) {
+        console.error("Erreur connexion/création tables:", err.message);
+    } finally {
+        if (connection) connection.release();
+    }
+}
+
+// Initialiser les tables au démarrage
+initializeTables();
+
 module.exports = pool;
