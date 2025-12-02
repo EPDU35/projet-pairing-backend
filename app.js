@@ -26,6 +26,7 @@ app.get("/", (req, res) => {
 
 // Routes publiques
 app.post("/api/inscription", users.inscrire);
+app.post("/api/tirage", users.decouvrirAttribution);
 
 // Routes admin
 app.post("/api/admin/login", users.loginAdmin);
@@ -33,6 +34,7 @@ app.get("/api/admin/participants", users.getParticipants);
 app.post("/api/admin/parrainer", users.fairePairing);
 app.get("/api/admin/paires", users.getPaires);
 app.get("/api/admin/export", users.exporterExcel);
+app.delete("/api/admin/participant/:id", users.supprimerParticipant);
 app.delete("/api/admin/reset", users.reinitialiser);
 
 const PORT = process.env.PORT || 3000;
