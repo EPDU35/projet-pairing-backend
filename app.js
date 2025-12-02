@@ -15,7 +15,10 @@ app.get("/", (req, res) => {
         endpoints: [
             "POST /api/inscription",
             "POST /api/admin/login",
-            "GET /api/admin/participants"
+            "GET /api/admin/participants",
+            "POST /api/admin/parrainer",
+            "GET /api/admin/export",
+            "DELETE /api/admin/reset"
         ]
     });
 });
@@ -32,7 +35,9 @@ app.delete("/api/admin/reset", users.reinitialiser);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`\nServeur BDE démarré`);
+    console.log("\nServeur BDE démarré");
     console.log(`Port: ${PORT}`);
     console.log(`${new Date().toLocaleString('fr-FR')}\n`);
 });
+
+module.exports = app;
