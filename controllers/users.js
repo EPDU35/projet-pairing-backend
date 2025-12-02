@@ -10,7 +10,9 @@ setInterval(() => {
 }, 15 * 60 * 1000);
 
 exports.loginAdmin = async (req, res) => {
-    const { identifiant, code } = req.body;
+    // Accepter soit identifiant/code (frontend) soit username/password
+    const identifiant = req.body.identifiant || req.body.username;
+    const code = req.body.code || req.body.password;
     const ip = req.ip || req.connection.remoteAddress;
 
     if (loginAttempts[ip] >= 5) {
