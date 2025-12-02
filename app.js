@@ -27,6 +27,7 @@ app.get("/", (req, res) => {
 // Routes publiques
 app.post("/api/inscription", users.inscrire);
 app.post("/api/tirage", users.decouvrirAttribution);
+app.get("/api/tirage/statut", users.verifierStatutTirage);
 
 // Routes admin
 app.post("/api/admin/login", users.loginAdmin);
