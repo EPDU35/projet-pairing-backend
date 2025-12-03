@@ -32,6 +32,7 @@ if (DATABASE_URL) {
         await connection.query(`
             CREATE TABLE IF NOT EXISTS users (
                 id INT AUTO_INCREMENT PRIMARY KEY,
+                identifiant VARCHAR(50) UNIQUE NOT NULL,
                 nom VARCHAR(100) NOT NULL,
                 prenom VARCHAR(100) NOT NULL,
                 sexe ENUM('M', 'F') NOT NULL,
