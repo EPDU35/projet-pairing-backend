@@ -59,11 +59,22 @@ exports.inscrire = async (req, res) => {
             return res.status(409).json({ message: "Tu es déjà inscrit !" });
         }
 
+        // Générer l'identifiant : JDI-AB1234
+        const premiereLettraNom = nom.charAt(0).toUpperCase();
+        const premiereLettrePrenom = prenom.charAt(0).toUpperCase();
+        const chiffresAleatoires = Math.floor(1000 + Math.random() * 9000); // 4 chiffres aléatoires
+        const identifiant = `JDI-${premiereLettraNom}${premiereLettrePrenom}${chiffresAleatoires}`;
+
         const [result] = await pool.query(
-            "INSERT INTO users (nom, prenom, sexe, niveau) VALUES (?, ?, ?, ?)",
-            [nom.trim(), prenom.trim(), sexe, niveau]
+            "INSERT INTO users (identifiant, nom, prenom, sexe, niveau) VALUES (?, ?, ?, ?, ?)",
+            [identifiant, nom.trim(), prenom.trim(), sexe, niveau]
         );
-        res.json({ message: "Inscription réussie", userId: result.insertId });
+        
+        res.json({ 
+            message: "Inscription réussie ! Conserve bien ton identifiant", 
+            identifiant: identifiant,
+            userId: result.insertId 
+        });
     } catch (err) {
         console.error("Erreur insertion:", err);
         res.status(500).json({ message: "Erreur lors de l'inscription" });
@@ -256,22 +267,22 @@ exports.supprimerParticipant = async (req, res) => {
 
 // Nouvelle fonction : Découvrir son attribution
 exports.decouvrirAttribution = async (req, res) => {
-    const { nom, prenom } = req.body;
+    const { identifiant } = req.body;
     
-    if (!nom || !prenom) {
-        return res.status(400).json({ message: "Nom et prénom requis" });
+    if (!identifiant) {
+        return res.status(400).json({ message: "Identifiant requis" });
     }
     
     try {
         // Vérifier que la personne existe
         const [users] = await pool.query(
-            "SELECT * FROM users WHERE LOWER(nom) = LOWER(?) AND LOWER(prenom) = LOWER(?)",
-            [nom.trim(), prenom.trim()]
+            "SELECT * FROM users WHERE identifiant = ?",
+            [identifiant.trim().toUpperCase()]
         );
         
         if (users.length === 0) {
             return res.status(404).json({ 
-                message: "Aucune inscription trouvée avec ce nom et prénom. Vérifie l'orthographe !" 
+                message: "Identifiant introuvable. Vérifie que tu l'as bien saisi !" 
             });
         }
         
@@ -279,7 +290,7 @@ exports.decouvrirAttribution = async (req, res) => {
         
         // Chercher son attribution
         const [attributions] = await pool.query(`
-            SELECT u.prenom, u.nom, u.sexe
+            SELECT u.prenom, u.nom, u.sexe, u.niveau
             FROM attributions a
             JOIN users u ON a.receveur_id = u.id
             WHERE a.donneur_id = ?
@@ -296,6 +307,7 @@ exports.decouvrirAttribution = async (req, res) => {
         res.json({
             message: "Voici ton attribution",
             receveur: `${receveur.prenom} ${receveur.nom}`,
+            niveau: receveur.niveau,
             sexeReceveur: receveur.sexe
         });
         
