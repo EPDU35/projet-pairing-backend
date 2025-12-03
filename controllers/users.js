@@ -103,8 +103,17 @@ exports.fairePairing = async (req, res) => {
         const [users] = await pool.query("SELECT * FROM users");
 
         if (users.length < 2) {
-            return res.status(400).json({ message: "Il faut au moins 2 participants" });
+            return res.status(400).json({ message: "Il faut au moins 2 participants pour créer des binômes" });
         }
+
+        // Grouper par niveau
+        const parNiveau = {
+            'L1': users.filter(u => u.niveau === 'L1'),
+            'L2': users.filter(u => u.niveau === 'L2'),
+            'L3': users.filter(u => u.niveau === 'L3'),
+            'M1': users.filter(u => u.niveau === 'M1'),
+            'M2': users.filter(u => u.niveau === 'M2')
+        };
 
         // Mélange Fisher-Yates
         const melanger = (arr) => {
@@ -116,51 +125,76 @@ exports.fairePairing = async (req, res) => {
             return shuffled;
         };
 
-        // Créer un cycle : chaque personne donne à la suivante
-        // A -> B -> C -> D -> A (cycle fermé)
-        const usersMelanges = melanger([...users]);
-        const attributions = [];
+        const toutesLesAttributions = [];
+        const statsParNiveau = {};
 
-        for (let i = 0; i < usersMelanges.length; i++) {
-            const donneur = usersMelanges[i];
-            const receveur = usersMelanges[(i + 1) % usersMelanges.length];
-            
-            // Éviter qu'une personne se donne à elle-même
-            if (donneur.id !== receveur.id) {
-                attributions.push({
-                    donneur: donneur,
-                    receveur: receveur
-                });
+        // Faire le tirage pour chaque niveau
+        for (const [niveau, usersNiveau] of Object.entries(parNiveau)) {
+            if (usersNiveau.length === 0) continue;
+
+            if (usersNiveau.length === 1) {
+                statsParNiveau[niveau] = {
+                    total: 0,
+                    message: "1 seule personne, pas de tirage possible"
+                };
+                continue;
             }
+
+            // Créer un cycle : chaque personne donne à la suivante du MÊME NIVEAU
+            const usersMelanges = melanger([...usersNiveau]);
+            const attributions = [];
+
+            for (let i = 0; i < usersMelanges.length; i++) {
+                const donneur = usersMelanges[i];
+                const receveur = usersMelanges[(i + 1) % usersMelanges.length];
+                
+                if (donneur.id !== receveur.id) {
+                    attributions.push({
+                        donneur: donneur,
+                        receveur: receveur
+                    });
+                }
+            }
+
+            toutesLesAttributions.push(...attributions);
+
+            statsParNiveau[niveau] = {
+                total: attributions.length,
+                garconsVersFilles: attributions.filter(a => a.donneur.sexe === "M" && a.receveur.sexe === "F").length,
+                fillesVersGarcons: attributions.filter(a => a.donneur.sexe === "F" && a.receveur.sexe === "M").length,
+                memeSexe: attributions.filter(a => a.donneur.sexe === a.receveur.sexe).length
+            };
+        }
+
+        if (toutesLesAttributions.length === 0) {
+            return res.status(400).json({ 
+                message: "Aucun tirage possible. Chaque niveau doit avoir au moins 2 participants." 
+            });
         }
 
         // Supprimer anciennes attributions
         await pool.query("DELETE FROM attributions");
 
         // Insérer les nouvelles
-        for (const attr of attributions) {
+        for (const attr of toutesLesAttributions) {
             await pool.query(
                 "INSERT INTO attributions (donneur_id, receveur_id) VALUES (?, ?)",
                 [attr.donneur.id, attr.receveur.id]
             );
         }
 
-        const stats = {
-            total: attributions.length,
-            garconsVersFilles: attributions.filter(a => a.donneur.sexe === "M" && a.receveur.sexe === "F").length,
-            fillesVersGarcons: attributions.filter(a => a.donneur.sexe === "F" && a.receveur.sexe === "M").length,
-            memeSexe: attributions.filter(a => a.donneur.sexe === a.receveur.sexe).length
-        };
-
         res.json({
-            message: "Tirage réussi ! Chaque personne donne à une seule personne et reçoit d'une seule personne",
-            attributions: attributions.map(a => ({
-                donneur: `${a.donneur.prenom} ${a.donneur.nom}`,
-                receveur: `${a.receveur.prenom} ${a.receveur.nom}`,
-                sexeDonneur: a.donneur.sexe,
-                sexeReceveur: a.receveur.sexe
-            })),
-            stats
+            message: "Tirage réussi par niveau ! Chaque personne donne à une seule personne de son niveau",
+            statsGlobales: {
+                total: toutesLesAttributions.length,
+                niveaux: Object.keys(statsParNiveau).filter(n => statsParNiveau[n].total > 0).length
+            },
+            statsParNiveau,
+            attributions: toutesLesAttributions.map(a => ({
+                donneur: `${a.donneur.prenom} ${a.donneur.nom} (${a.donneur.niveau})`,
+                receveur: `${a.receveur.prenom} ${a.receveur.nom} (${a.receveur.niveau})`,
+                niveau: a.donneur.niveau
+            }))
         });
 
     } catch (err) {
